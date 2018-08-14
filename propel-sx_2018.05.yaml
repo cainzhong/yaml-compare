@@ -1,0 +1,225 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: propel-sx-svc
+  labels:
+    itsmaRelease: "2018.05"
+    name: propel-sx-svc
+    itsmaService: itom-service-portal
+  namespace: itsma1
+spec:
+  ports:
+  - port: 9444
+    targetPort: 9081
+  selector:
+    name: propel-sx
+
+---
+apiVersion: extensions/v1beta1
+kind: Deployment
+metadata:
+  name: propel-sx
+  namespace: itsma1
+  labels:
+    itsmaRelease: "2018.05"
+    name: propel-sx
+    itsmaService: itom-service-portal
+    AffectedPersistentStorage: database
+spec:
+  replicas: 1
+  template:
+    metadata:
+      labels:
+        name: propel-sx
+        itsmaService: itom-service-portal
+      annotations:
+        pod.boostport.com/vault-approle: itsma1-itom-service-portal
+        pod.boostport.com/vault-init-container: install
+    spec:
+      nodeSelector:
+        Worker: label
+      initContainers:
+      - name: install
+        image: localhost:5000/kubernetes-vault-init:0.5.0
+        imagePullPolicy: IfNotPresent
+        env:
+        - name: VAULT_ROLE_ID
+          value: 3dbeacd4-3ae0-f45b-4c9b-e4b72c93b558
+        volumeMounts:
+        - name: vault-token
+          mountPath: /var/run/secrets/boostport.com
+      containers:
+      - name: kubernetes-vault-renew
+        image: localhost:5000/kubernetes-vault-renew:0.5.0
+        imagePullPolicy: IfNotPresent
+        volumeMounts:
+        - name: vault-token
+          mountPath: /var/run/secrets/boostport.com
+      - name: propel-sx
+        image:  ${docker_image_registry}/itom-propel-sx-webapp:2.27.0.006
+        resources:
+          requests:
+            memory: 512Mi
+            cpu: 0m
+          limits:
+            memory: 2048Mi
+            cpu: 2000m
+        env:
+        - name: time_zone
+          valueFrom:
+            configMapKeyRef:
+              name: itsma-common-configmap
+              key: time_zone
+        - name: rabbitmq_nodes
+          valueFrom:
+            configMapKeyRef:
+              name: propel-configmap
+              key: rabbitmq_nodes
+        - name: RABBITMQ_USER
+          valueFrom:
+            configMapKeyRef:
+              name: propel-configmap
+              key: rabbit_user
+        - name: RABBIT_PASS_SECRET_KEY
+          value: rabbit_pass_secret_key
+        - name: SP_DB_USERNAME
+          valueFrom:
+            configMapKeyRef:
+              name: database-configmap
+              key: propel_db_username
+        - name: SP_DB_HOST
+          valueFrom:
+            configMapKeyRef:
+              name: database-configmap
+              key: propel_db_host
+        - name: SP_DB_PORT
+          valueFrom:
+            configMapKeyRef:
+              name: database-configmap
+              key: propel_db_port
+        - name: ITOM_ITSMA_DB_PASSWORD_SECRET_KEY
+          value: itom_itsma_db_password_secret_key
+        - name: DIAGNOSTICS_TRANSPORT_USER
+          value: diagnosticsTransportUser
+        - name: sx_hystrix_command_default_execution_isolation_thread_timeoutInMilliseconds
+          valueFrom:
+            configMapKeyRef:
+              name: propel-configmap
+              key: sx_hystrix_command_default_execution_isolation_thread_timeoutInMilliseconds
+        - name: sx_hystrix_threadpool_default_coreSize
+          valueFrom:
+            configMapKeyRef:
+              name: propel-configmap
+              key: sx_hystrix_threadpool_default_coreSize
+        - name: sx_hystrix_threadpool_default_maxQueueSize
+          valueFrom:
+            configMapKeyRef:
+              name: propel-configmap
+              key: sx_hystrix_threadpool_default_maxQueueSize
+        - name: sx_hystrix_threadpool_default_queueSizeRejectionThreshold
+          valueFrom:
+            configMapKeyRef:
+              name: propel-configmap
+              key: sx_hystrix_threadpool_default_queueSizeRejectionThreshold
+        - name: log_max_filesize
+          valueFrom:
+            configMapKeyRef:
+              name: propel-configmap
+              key: log_max_filesize
+        - name: domain_name
+          valueFrom:
+            configMapKeyRef:
+              name: propel-configmap
+              key: suite_domain_name
+        - name: PROPEL_DIAGNOSTICS_TRANSPORT_PWD_SECRET_KEY
+          value: propel_diagnostics_transport_pwd_secret_key
+        - name: IDM_TRANSPORT_USER_PASSWORD_SECRET_KEY
+          value: idm_transport_user_password_secret_key
+        - name: IDM_ADMIN_PASSWORD_SECRET_KEY
+          value: idm_admin_password_secret_key
+        - name: SX_CATALOG_TRANSPORT_USER_PASSWORD_SECRET_KEY
+          value: sx_catalog_transport_user_password_secret_key
+        - name: ITOM_ITSMA_CERT_TRUSTSTORE_SECRET_KEY
+          value: itom_itsma_cert_truststore_secret_key
+        - name: ITOM_ITSMA_CERT_TRUSTSTORE_PATH
+          value: /var/itsma-cert/itsma-truststore.jks
+        - name: OTHER_OPTS
+          valueFrom:
+            configMapKeyRef:
+              name: propel-configmap
+              key: sx_java_other_options
+        - name: MEMORY_REQUEST
+          valueFrom:
+            resourceFieldRef:
+              resource: limits.memory
+        - name: PROPEL_LOGLEVEL
+          valueFrom:
+            configMapKeyRef:
+              name: propel-configmap
+              key: propel_loglevel
+        - name: CONTENTPACK_DEFAULT_TENANT
+          valueFrom:
+            configMapKeyRef:
+              name: idm-config
+              key: idm_tenant
+        - name: HEALTH_CHECK_REMOVER
+          value: "SX.CircuitBreakerHealthCheck;SX.ThreadDeadlockHealthCheck;SX.OOHealthCheck;SX.SubscriptionNotificationEndpointHealthCheck"
+        - name: HEALTH_CHECK_INDICATOR
+          value: "SX.AmqpHealthCheck#propel-rabbitmq-svc;SX.CatalogNotificationEndpointHealthCheck#propel-catalog-svc;SX.DBHealthCheck#postgresql-svc;SX.IdmHealthCheck#idm-svc"
+        - name: service_name
+          value: "propel-sx-svc"
+        - name: DB_SSL_MODE
+          valueFrom:
+            configMapKeyRef:
+              name: database-configmap
+              key: propel_db_ssl
+        ports:
+        - containerPort: 9081
+        readinessProbe:
+          exec:
+            command:
+            - "/opt/hp/propel/healthz.sh"
+            - "http://localhost:9081/sx/suite/healthcheck"
+          initialDelaySeconds: 120
+          timeoutSeconds: 10
+          periodSeconds: 60
+          successThreshold: 1
+          failureThreshold: 6
+        livenessProbe:
+          httpGet:
+            path: /sx/monitoring/ping
+            port: 9081
+            scheme: HTTP
+          initialDelaySeconds: 180
+          timeoutSeconds: 10
+          periodSeconds: 30
+          successThreshold: 1
+          failureThreshold: 6
+        imagePullPolicy: IfNotPresent
+        volumeMounts:
+        - name: nfs
+          mountPath: /var/log/propel/jetty-sx
+          subPath: logs/propel/sx
+        - name: vault-token
+          mountPath: /var/run/secrets/boostport.com
+        - name: nfs
+          mountPath: /var/itsma-cert
+          subPath: certificate/ca-trust
+        - name: nfs
+          mountPath: /tmp/propel/adapter
+          subPath: lib/propel/adapter
+      volumes:
+        - name: nfs
+          persistentVolumeClaim:
+            claimName: global-volume
+        - name: vault-token
+          emptyDir: {}
+      securityContext:
+        fsGroup: 1999
+      imagePullSecrets:
+        - name: registrypullsecret
+  strategy:
+    rollingUpdate:
+      maxSurge: 30%
+      maxUnavailable: 30%
+    type: RollingUpdate
